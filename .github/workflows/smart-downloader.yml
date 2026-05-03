@@ -22,22 +22,53 @@ jobs:
       - uses: actions/checkout@v4
       - name: Process File
         run: |
-          sudo apt-get update && sudo apt-get install -y zip
+          sudo apt-get update && sudo apt-get install -y zip file
           URL="${{ github.event.inputs.file_url }}"
           FOLDER="${{ github.event.inputs.folder_name }}"
           SAFE_MODE="${{ github.event.inputs.safe_mode }}"
 
           RAW_NAME=$(basename "${URL%%\?*}" | sed 's/%20/ /g')
-          EXT="${RAW_NAME##*.}"
+          NAME_NO_EXT="${RAW_NAME%.*}"
+          URL_EXT="${RAW_NAME##*.}"
+          if [ "$URL_EXT" = "$RAW_NAME" ]; then URL_EXT=""; fi
 
-          if [ "$SAFE_MODE" == "true" ]; then
-            FINAL_FILE="$FOLDER.$EXT"
-          else
-            NAME_NO_EXT="${RAW_NAME%.*}"
-            FINAL_FILE="$NAME_NO_EXT.$EXT"
+          curl -L --fail --retry 5 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --progress-bar -D headers.txt -o "temp_download" "$URL"
+
+          CONTENT_TYPE=$(grep -i "^content-type:" headers.txt | tail -n 1 | cut -d":" -f2- | tr -d "\r" | xargs)
+          MIME_TYPE=$(file --mime-type -b temp_download)
+          SELECTED_EXT="$URL_EXT"
+
+          if [ -z "$SELECTED_EXT" ] || [ ${#SELECTED_EXT} -gt 5 ]; then
+            case "$CONTENT_TYPE|$MIME_TYPE" in
+              *application/zip*|*application/x-zip*|*application/x-zip-compressed*) SELECTED_EXT="zip" ;;
+              *application/pdf*) SELECTED_EXT="pdf" ;;
+              *video/mp4*) SELECTED_EXT="mp4" ;;
+              *video/x-matroska*) SELECTED_EXT="mkv" ;;
+              *video/x-msvideo*) SELECTED_EXT="avi" ;;
+              *video/webm*) SELECTED_EXT="webm" ;;
+              *audio/mpeg*) SELECTED_EXT="mp3" ;;
+              *audio/flac*) SELECTED_EXT="flac" ;;
+              *audio/wav*|*audio/x-wav*) SELECTED_EXT="wav" ;;
+              *image/jpeg*) SELECTED_EXT="jpg" ;;
+              *image/png*) SELECTED_EXT="png" ;;
+              *image/webp*) SELECTED_EXT="webp" ;;
+              *application/x-rar*) SELECTED_EXT="rar" ;;
+              *application/x-7z-compressed*) SELECTED_EXT="7z" ;;
+              *application/x-tar*) SELECTED_EXT="tar" ;;
+              *application/gzip*) SELECTED_EXT="gz" ;;
+              *) SELECTED_EXT="bin" ;;
+            esac
           fi
 
-          curl -L --fail --retry 5 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --progress-bar -o "temp_download" "$URL"
+          if [ "$SAFE_MODE" == "true" ]; then
+            FINAL_FILE="$FOLDER.$SELECTED_EXT"
+          else
+            if [ -n "$NAME_NO_EXT" ] && [ "$NAME_NO_EXT" != "$RAW_NAME" ]; then
+              FINAL_FILE="$NAME_NO_EXT.$SELECTED_EXT"
+            else
+              FINAL_FILE="$FOLDER.$SELECTED_EXT"
+            fi
+          fi
 
           mkdir -p wrap_dir
           mv "temp_download" "wrap_dir/$FINAL_FILE"
